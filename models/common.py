@@ -31,6 +31,8 @@ from utils.general import (LOGGER, ROOT, Profile, check_requirements, check_suff
                            xywh2xyxy, xyxy2xywh, yaml_load)
 from utils.plots import Annotator, colors, save_one_box
 from utils.torch_utils import copy_attr, smart_inference_mode
+from .pconv import PConv2d
+from timm.models.layers import DropPath
 
 
 def autopad(k, p=None, d=1):  # kernel, padding, dilation
@@ -78,7 +80,7 @@ class ADown(nn.Module):
 
     def forward(self, x):
         x = torch.nn.functional.avg_pool2d(x, 2, 1, 0, False, True)
-        x1,x2 = x.chunk(2, 1)
+        x1, x2 = x.chunk(2, 1)
         x1 = self.cv1(x1)
         x2 = torch.nn.functional.max_pool2d(x2, 3, 2, 1)
         x2 = self.cv2(x2)
@@ -236,7 +238,7 @@ class DFL(nn.Module):
     def __init__(self, c1=17):
         super().__init__()
         self.conv = nn.Conv2d(c1, 1, 1, bias=False).requires_grad_(False)
-        self.conv.weight.data[:] = nn.Parameter(torch.arange(c1, dtype=torch.float).view(1, c1, 1, 1)) # / 120.0
+        self.conv.weight.data[:] = nn.Parameter(torch.arange(c1, dtype=torch.float).view(1, c1, 1, 1))  # / 120.0
         self.c1 = c1
         # self.bn = nn.BatchNorm2d(4)
 
@@ -550,12 +552,13 @@ class Shortcut(nn.Module):
         self.d = dimension
 
     def forward(self, x):
-        return x[0]+x[1]
+        return x[0] + x[1]
 
 
 class Silence(nn.Module):
     def __init__(self):
         super(Silence, self).__init__()
+
     def forward(self, x):
         return x
 
@@ -571,7 +574,7 @@ class SPPELAN(nn.Module):
         self.cv2 = SP(5)
         self.cv3 = SP(5)
         self.cv4 = SP(5)
-        self.cv5 = Conv(4*c3, c2, 1, 1)
+        self.cv5 = Conv(4 * c3, c2, 1, 1)
 
     def forward(self, x):
         y = [self.cv1(x)]
@@ -583,11 +586,11 @@ class RepNCSPELAN4(nn.Module):
     # csp-elan
     def __init__(self, c1, c2, c3, c4, c5=1):  # ch_in, ch_out, number, shortcut, groups, expansion
         super().__init__()
-        self.c = c3//2
+        self.c = c3 // 2
         self.cv1 = Conv(c1, c3, 1, 1)
-        self.cv2 = nn.Sequential(RepNCSP(c3//2, c4, c5), Conv(c4, c4, 3, 1))
+        self.cv2 = nn.Sequential(RepNCSP(c3 // 2, c4, c5), Conv(c4, c4, 3, 1))
         self.cv3 = nn.Sequential(RepNCSP(c4, c4, c5), Conv(c4, c4, 3, 1))
-        self.cv4 = Conv(c3+(2*c4), c2, 1, 1)
+        self.cv4 = Conv(c3 + (2 * c4), c2, 1, 1)
 
     def forward(self, x):
         y = list(self.cv1(x).chunk(2, 1))
@@ -598,6 +601,7 @@ class RepNCSPELAN4(nn.Module):
         y = list(self.cv1(x).split((self.c, self.c), 1))
         y.extend(m(y[-1]) for m in [self.cv2, self.cv3])
         return self.cv4(torch.cat(y, 1))
+
 
 #################
 
@@ -612,6 +616,7 @@ class BiLevelRoutingAttention(nn.Module):
     diff_routing: wether to set routing differentiable
     soft_routing: wether to multiply soft routing weights
     """
+
     def __init__(self, dim, n_win=7, num_heads=8, qk_dim=None, qk_scale=None,
                  kv_per_win=4, kv_downsample_ratio=4, kv_downsample_kernel=None, kv_downsample_mode='identity',
                  topk=4, param_attention="qkvo", param_routing=False, diff_routing=False, soft_routing=False, side_dwconv=3,
@@ -622,11 +627,11 @@ class BiLevelRoutingAttention(nn.Module):
         self.n_win = n_win  # Wh, Ww
         self.num_heads = num_heads
         self.qk_dim = qk_dim or dim
-        assert self.qk_dim % num_heads == 0 and self.dim % num_heads==0, 'qk_dim and dim must be divisible by num_heads!'
+        assert self.qk_dim % num_heads == 0 and self.dim % num_heads == 0, 'qk_dim and dim must be divisible by num_heads!'
         self.scale = qk_scale or self.qk_dim ** -0.5
 
         ################side_dwconv (i.e. LCE in ShuntedTransformer)###########
-        self.lepe = nn.Conv2d(dim, dim, kernel_size=side_dwconv, stride=1, padding=side_dwconv//2, groups=dim) if side_dwconv > 0 else \
+        self.lepe = nn.Conv2d(dim, dim, kernel_size=side_dwconv, stride=1, padding=side_dwconv // 2, groups=dim) if side_dwconv > 0 else \
             lambda x: torch.zeros_like(x)
 
         ################ global routing setting #################
@@ -635,15 +640,15 @@ class BiLevelRoutingAttention(nn.Module):
         self.diff_routing = diff_routing
         self.soft_routing = soft_routing
         # router
-        assert not (self.param_routing and not self.diff_routing) # cannot be with_param=True and diff_routing=False
+        assert not (self.param_routing and not self.diff_routing)  # cannot be with_param=True and diff_routing=False
         self.router = TopkRouting(qk_dim=self.qk_dim,
                                   qk_scale=self.scale,
                                   topk=self.topk,
                                   diff_routing=self.diff_routing,
                                   param_routing=self.param_routing)
-        if self.soft_routing: # soft routing, always diffrentiable (if no detach)
+        if self.soft_routing:  # soft routing, always diffrentiable (if no detach)
             mul_weight = 'soft'
-        elif self.diff_routing: # hard differentiable routing
+        elif self.diff_routing:  # hard differentiable routing
             mul_weight = 'hard'
         else:  # hard non-differentiable routing
             mul_weight = 'none'
@@ -676,7 +681,7 @@ class BiLevelRoutingAttention(nn.Module):
         elif self.kv_downsample_mode == 'avgpool':
             assert self.kv_downsample_ratio is not None
             self.kv_down = nn.AvgPool2d(self.kv_downsample_ratio) if self.kv_downsample_ratio > 1 else nn.Identity()
-        elif self.kv_downsample_mode == 'identity': # no kv downsampling
+        elif self.kv_downsample_mode == 'identity':  # no kv downsampling
             self.kv_down = nn.Identity()
         elif self.kv_downsample_mode == 'fracpool':
             # assert self.kv_downsample_ratio is not None
@@ -694,7 +699,7 @@ class BiLevelRoutingAttention(nn.Module):
         # softmax for local attention
         self.attn_act = nn.Softmax(dim=-1)
 
-        self.auto_pad=auto_pad
+        self.auto_pad = auto_pad
 
     def forward(self, x, ret_attn_mask=False):
         """
@@ -712,15 +717,14 @@ class BiLevelRoutingAttention(nn.Module):
             pad_l = pad_t = 0
             pad_r = (self.n_win - W_in % self.n_win) % self.n_win
             pad_b = (self.n_win - H_in % self.n_win) % self.n_win
-            x = F.pad(x, (0, 0, # dim=-1
-                          pad_l, pad_r, # dim=-2
-                          pad_t, pad_b)) # dim=-3
-            _, H, W, _ = x.size() # padded size
+            x = F.pad(x, (0, 0,  # dim=-1
+                          pad_l, pad_r,  # dim=-2
+                          pad_t, pad_b))  # dim=-3
+            _, H, W, _ = x.size()  # padded size
         else:
             N, H, W, C = x.size()
-            assert H%self.n_win == 0 and W%self.n_win == 0 #
+            assert H % self.n_win == 0 and W % self.n_win == 0  #
         ###################################################
-
 
         # patchify, (n, p^2, w, w, c), keep 2d window as we need 2d pooling to reduce kv size
         #print(x.shape,self.n_win)
@@ -739,7 +743,7 @@ class BiLevelRoutingAttention(nn.Module):
         kv_pix = self.kv_down(rearrange(kv, 'n p2 h w c -> (n p2) c h w'))
         kv_pix = rearrange(kv_pix, '(n j i) c h w -> n (j i) (h w) c', j=self.n_win, i=self.n_win)
 
-        q_win, k_win = q.mean([2, 3]), kv[..., 0:self.qk_dim].mean([2, 3]) # window-wise qk, (n, p^2, c_qk), (n, p^2, c_qk)
+        q_win, k_win = q.mean([2, 3]), kv[..., 0:self.qk_dim].mean([2, 3])  # window-wise qk, (n, p^2, c_qk), (n, p^2, c_qk)
 
         ##################side_dwconv(lepe)##################
         # NOTE: call contiguous to avoid gradient warning when using ddp
@@ -748,24 +752,24 @@ class BiLevelRoutingAttention(nn.Module):
 
         ############ gather q dependent k/v #################
 
-        r_weight, r_idx = self.router(q_win, k_win) # both are (n, p^2, topk) tensors
+        r_weight, r_idx = self.router(q_win, k_win)  # both are (n, p^2, topk) tensors
 
-        kv_pix_sel = self.kv_gather(r_idx=r_idx, r_weight=r_weight, kv=kv_pix) #(n, p^2, topk, h_kv*w_kv, c_qk+c_v)
+        kv_pix_sel = self.kv_gather(r_idx=r_idx, r_weight=r_weight, kv=kv_pix)  #(n, p^2, topk, h_kv*w_kv, c_qk+c_v)
         k_pix_sel, v_pix_sel = kv_pix_sel.split([self.qk_dim, self.dim], dim=-1)
         # kv_pix_sel: (n, p^2, topk, h_kv*w_kv, c_qk)
         # v_pix_sel: (n, p^2, topk, h_kv*w_kv, c_v)
 
         ######### do attention as normal ####################
-        k_pix_sel = rearrange(k_pix_sel, 'n p2 k w2 (m c) -> (n p2) m c (k w2)', m=self.num_heads) # flatten to BMLC, (n*p^2, m, topk*h_kv*w_kv, c_kq//m) transpose here?
-        v_pix_sel = rearrange(v_pix_sel, 'n p2 k w2 (m c) -> (n p2) m (k w2) c', m=self.num_heads) # flatten to BMLC, (n*p^2, m, topk*h_kv*w_kv, c_v//m)
-        q_pix = rearrange(q_pix, 'n p2 w2 (m c) -> (n p2) m w2 c', m=self.num_heads) # to BMLC tensor (n*p^2, m, w^2, c_qk//m)
+        k_pix_sel = rearrange(k_pix_sel, 'n p2 k w2 (m c) -> (n p2) m c (k w2)', m=self.num_heads)  # flatten to BMLC, (n*p^2, m, topk*h_kv*w_kv, c_kq//m) transpose here?
+        v_pix_sel = rearrange(v_pix_sel, 'n p2 k w2 (m c) -> (n p2) m (k w2) c', m=self.num_heads)  # flatten to BMLC, (n*p^2, m, topk*h_kv*w_kv, c_v//m)
+        q_pix = rearrange(q_pix, 'n p2 w2 (m c) -> (n p2) m w2 c', m=self.num_heads)  # to BMLC tensor (n*p^2, m, w^2, c_qk//m)
 
         # param-free multihead attention
-        attn_weight = (q_pix * self.scale) @ k_pix_sel # (n*p^2, m, w^2, c) @ (n*p^2, m, c, topk*h_kv*w_kv) -> (n*p^2, m, w^2, topk*h_kv*w_kv)
+        attn_weight = (q_pix * self.scale) @ k_pix_sel  # (n*p^2, m, w^2, c) @ (n*p^2, m, c, topk*h_kv*w_kv) -> (n*p^2, m, w^2, topk*h_kv*w_kv)
         attn_weight = self.attn_act(attn_weight)
-        out = attn_weight @ v_pix_sel # (n*p^2, m, w^2, topk*h_kv*w_kv) @ (n*p^2, m, topk*h_kv*w_kv, c) -> (n*p^2, m, w^2, c)
+        out = attn_weight @ v_pix_sel  # (n*p^2, m, w^2, topk*h_kv*w_kv) @ (n*p^2, m, topk*h_kv*w_kv, c) -> (n*p^2, m, w^2, c)
         out = rearrange(out, '(n j i) m (h w) c -> n (j h) (i w) (m c)', j=self.n_win, i=self.n_win,
-                        h=H//self.n_win, w=W//self.n_win)
+                        h=H // self.n_win, w=W // self.n_win)
 
         out = out + lepe
         # output linear
@@ -782,7 +786,171 @@ class BiLevelRoutingAttention(nn.Module):
             return rearrange(out, "n h w c -> n c h w")
 
 
-##### YOLOR #####
+class ConvBNLayer(nn.Module):
+    def __init__(self,
+                 in_channels: int,
+                 out_channels: int,
+                 kernel_size:int = 1,
+                 stride: int = 1,
+                 padding: int = 0,
+                 dilation: int = 1,
+                 bias: bool = False,
+                 act: str = 'ReLU'):
+        super(ConvBNLayer, self).__init__()
+        assert act in ('ReLU', 'GELU')
+        self.conv = nn.Conv2d(in_channels,
+                              out_channels,
+                              kernel_size,
+                              stride,
+                              padding,
+                              dilation,
+                              bias=bias)
+        self.bn = nn.BatchNorm2d(out_channels)
+        self.act = getattr(nn, act)()
+
+    def _fuse_bn_tensor(self) -> None:
+        kernel = self.conv.weight
+        bias = self.conv.bias if hasattr(self.conv, 'bias') and self.conv.bias is not None else 0
+        running_mean = self.bn.running_mean
+        running_var = self.bn.running_var
+        gamma = self.bn.weight
+        beta = self.bn.bias
+        eps = self.bn.eps
+        std = (running_var + eps).sqrt()
+        t = (gamma / std).reshape(-1, 1, 1, 1)
+        self.conv.weight.data = kernel * t
+        self.conv.bias = nn.Parameter(beta - (running_mean - bias) * gamma / std, requires_grad=False)
+        self.bn = nn.Identity()
+        return self.conv.weight.data, self.conv.bias.data
+
+    def forward(self, x: Tensor) -> Tensor:
+        x = self.conv(x)
+        x = self.bn(x)
+        x = self.act(x)
+
+        return x
+
+
+class PConvBNLayer(nn.Module):
+    def __init__(self,
+                 in_channels: int,
+                 out_channels: int,
+                 kernel_size: int = 1,
+                 stride: int = 1,
+                 padding: int = 0,
+                 dilation: int = 1,
+                 n_div: int = 4,
+                 forward: str = 'split_cat',
+                 bias: bool = False,
+                 act: str = 'ReLU'):
+        super(PConvBNLayer, self).__init__()
+        assert act in ('ReLU', 'GELU')
+        self.conv = PConv2d(in_channels,
+                            kernel_size,
+                            n_div,
+                            forward,
+                            bias,
+                            stride)
+        self.bn = nn.BatchNorm2d(out_channels)
+        self.act = getattr(nn, act)()
+
+    def _fuse_bn_tensor(self) -> None:
+        kernel = self.conv.conv.weight
+        bias = self.conv.conv.bias if hasattr(self.conv, 'bias') and self.conv.conv.bias is not None else 0
+        running_mean = self.bn.running_mean
+        running_var = self.bn.running_var
+        gamma = self.bn.weight
+        beta = self.bn.bias
+        eps = self.bn.eps
+        std = (running_var + eps).sqrt()
+        t = (gamma / std).reshape(-1, 1, 1, 1)
+        self.conv.conv.weight.data = kernel * t
+        self.conv.conv.bias = nn.Parameter(beta - (running_mean - bias) * gamma / std, requires_grad=False)
+        self.bn = nn.Identity()
+        return self.conv.conv.weight.data, self.conv.conv.bias.data
+
+    def forward(self, x: Tensor) -> Tensor:
+        x = self.conv(x)
+        x = self.bn(x)
+        x = self.act(x)
+
+        return x
+
+
+class FasterNetBlock(nn.Module):
+    def __init__(self,
+                 in_channels: int,
+                 inner_channels: int = None,
+                 kernel_size: int = 3,
+                 bias=False,
+                 act: str = 'ReLU',
+                 n_div: int = 4,
+                 forward: str = 'split_cat',
+                 drop_path: float = 0.,
+                 ):
+        super(FasterNetBlock, self).__init__()
+        inner_channels = inner_channels or in_channels * 2
+        self.conv1 = PConv2d(in_channels,
+                             kernel_size,
+                             n_div,
+                             forward)
+        self.conv2 = ConvBNLayer(in_channels,
+                                 inner_channels,
+                                 bias=bias,
+                                 act=act)
+        self.conv3 = nn.Conv2d(inner_channels,
+                               in_channels,
+                               kernel_size=1,
+                               stride=1,
+                               bias=False)
+        self.drop_path = DropPath(drop_path) if drop_path > 0. else nn.Identity()
+
+    def forward(self, x: Tensor) -> Tensor:
+        y = self.conv1(x)
+        y = self.conv2(y)
+        y = self.conv3(y)
+
+        return x + self.drop_path(y)
+
+
+class FocalFasterNetBlock(nn.Module):
+    def __init__(self,
+                 in_channels: int,
+                 inner_channels: int = None,
+                 kernel_size: int = 3,
+                 bias=False,
+                 act: str = 'ReLU',
+                 n_div: int = 4,
+                 forward: str = 'split_cat',
+                 drop_path: float = 0.,
+                 ):
+        super(FocalFasterNetBlock, self).__init__()
+        inner_channels = inner_channels or in_channels * 2
+        self.conv1 = PConv2d(in_channels,
+                             kernel_size,
+                             n_div,
+                             forward)
+
+        self.conv2 = PConvBNLayer(in_channels,
+                                  inner_channels,
+                                  n_div=n_div,
+                                  bias=bias,
+                                  act=act)
+        self.conv3 = PConv2d(in_channels,
+                             kernel_size,
+                             n_div,
+                             forward)
+        self.drop_path = DropPath(drop_path) if drop_path > 0. else nn.Identity()
+
+    def forward(self, x: Tensor) -> Tensor:
+        y = self.conv1(x)
+        y1 = self.conv2(y)
+        y1 = self.conv3(y1)
+
+        return x + self.drop_path(y) + self.drop_path(y1)
+
+    ##### YOLOR #####
+
 
 class ImplicitA(nn.Module):
     def __init__(self, channel):
@@ -805,6 +973,7 @@ class ImplicitM(nn.Module):
     def forward(self, x):
         return self.implicit * x
 
+
 #################
 
 
@@ -820,6 +989,7 @@ class CBLinear(nn.Module):
         outs = self.conv(x).split(self.c2s, dim=1)
         return outs
 
+
 class CBFuse(nn.Module):
     def __init__(self, idx):
         super(CBFuse, self).__init__()
@@ -830,6 +1000,7 @@ class CBFuse(nn.Module):
         res = [F.interpolate(x[self.idx[i]], size=target_size, mode='nearest') for i, x in enumerate(xs[:-1])]
         out = torch.sum(torch.stack(res + xs[-1:]), dim=0)
         return out
+
 
 #################
 

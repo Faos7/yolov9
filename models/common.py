@@ -885,8 +885,8 @@ class FasterNetBlock(nn.Module):
                  bias=False,
                  act: str = 'ReLU',
                  n_div: int = 4,
-                 forward: str = 'split_cat',
-                 drop_path: float = 0.,
+                 forward: str = 'slicing',
+                 drop_path: float = 0.1,
                  ):
         super(FasterNetBlock, self).__init__()
         inner_channels = inner_channels or in_channels * 2

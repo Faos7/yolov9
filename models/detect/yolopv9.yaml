@@ -1,4 +1,4 @@
-# YOLOv9
+# YOLOv9P
 
 # parameters
 nc: 80  # number of classes
@@ -8,7 +8,7 @@ width_multiple: 1.0  # layer channel multiple
 activation: nn.ReLU()
 
 # anchors
-anchors: 3
+anchors: 5
 
 # YOLOv9 backbone
 backbone:
@@ -19,13 +19,13 @@ backbone:
     [ -1, 1, Conv, [ 64, 3, 2 ] ],  # 1-P1/2
 
     # FFNB block
-    [ -1, 1, FocalFasterNetBlock[ 64 ] ], #2
+    [ -1, 1, PerceptionFasterNetBlock[ 64 ] ], #2
 
     # conv down
     [ -1, 1, Conv, [ 128, 3, 2 ] ],  # 3-P2/4
 
     # FFNB block
-    [ -1, 1, FocalFasterNetBlock[ 128 ] ], #4
+    [ -1, 1, PerceptionFasterNetBlock[ 128 ] ], #4
 
     # avg-conv down
     [ -1, 1, Conv, [ 256 , 3 , 2 ] ],  # 5-P3/8

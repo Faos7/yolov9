@@ -913,7 +913,7 @@ class FasterNetBlock(nn.Module):
         return x + self.drop_path(y)
 
 
-class FocalFasterNetBlock(nn.Module):
+class PerceptionFasterNetBlock(nn.Module):
     def __init__(self,
                  in_channels: int,
                  inner_channels: int = None,
@@ -924,7 +924,7 @@ class FocalFasterNetBlock(nn.Module):
                  forward: str = 'split_cat',
                  drop_path: float = 0.,
                  ):
-        super(FocalFasterNetBlock, self).__init__()
+        super(PerceptionFasterNetBlock, self).__init__()
         inner_channels = inner_channels or in_channels * 2
         self.conv1 = PConv2d(in_channels,
                              kernel_size,

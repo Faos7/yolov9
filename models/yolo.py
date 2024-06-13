@@ -748,7 +748,7 @@ def parse_model(d, ch):  # model_dict, input_channels(3)
         elif m is BiLevelRoutingAttention:
             c2 = ch[f]
             args = [c2, *args]
-        elif m is FocalFasterNetBlock:
+        elif m is PerceptionFasterNetBlock:
             c2 = ch[f]
             args = [c2, *args]
         elif m is Shortcut:

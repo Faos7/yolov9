@@ -1,0 +1,141 @@
+# YOLOv9
+
+# parameters
+nc: 80  # number of classes
+depth_multiple: 1.0  # model depth multiple
+width_multiple: 1.0  # layer channel multiple
+#activation: nn.LeakyReLU(0.1)
+#activation: nn.ReLU()
+
+# anchors
+anchors: 5
+
+# gelan backbone
+backbone:
+  [
+    # conv down
+    [ -1, 1, Conv, [ 16, 3, 2 ] ],  # 0-P1/2
+
+    # FFNB block
+    [ -1, 1, PerceptionFasterNetBlock[ 16 ] ], #1
+
+    # conv down
+    [ -1, 1, Conv, [ 32, 3, 2 ] ],  # 2-P2/4
+
+    [ -1, 1, PerceptionFasterNetBlock[ 32 ] ], #3
+
+    # avg-conv down
+    [ -1, 1, AConv, [ 64 ] ],  # 4-P3/8
+
+    # elan-2 block
+    [ -1, 1, RepNCSPELAN4, [ 64, 64, 32, 3 ] ],  # 5
+
+    # avg-conv down
+    [ -1, 1, AConv, [ 96 ] ],  # 6-P4/16
+
+    # biFormer block
+    [ -1, 1, BiLevelRoutingAttention, [ 8 ] ],  # 7
+
+    # avg-conv down
+    [ -1, 1, AConv, [ 128 ] ],  # 8-P5/32
+
+    # elan-2 block
+    [ -1, 1, RepNCSPELAN4, [ 128, 128, 64, 3 ] ],  # 9
+  ]
+
+# elan head
+head:
+  [
+    # elan-spp block
+    [-1, 1, SPPELAN, [128, 64]],  # 10
+
+    # up-concat merge
+    [-1, 1, nn.Upsample, [None, 2, 'nearest']], # 11
+    [[-1, 7], 1, Concat, [1]],  # 12 cat backbone P4
+
+    # elan-2 block
+    [-1, 1, RepNCSPELAN4, [96, 96, 48, 3]],  # 13
+
+    # up-concat merge
+    [-1, 1, nn.Upsample, [None, 2, 'nearest']], #14
+    [[-1, 5], 1, Concat, [1]],  # 15 cat backbone P3
+
+    # elan-2 block
+    [ -1, 1, RepNCSPELAN4, [ 64, 64, 32, 3 ] ],  # 16 (P3/8-small)
+
+    # up-concat merge
+    [ -1, 1, nn.Upsample, [ None, 2, 'nearest' ] ], # 17
+    [ [ -1, 3 ], 1, Concat, [ 1 ] ],  # 18 cat backbone P2
+
+    # elan-1 block
+    [ -1, 1, ELAN1, [ 32, 32, 16] ],  # 19 (P2/4-x-small)
+
+    # up-concat merge
+    [ -1, 1, nn.Upsample, [ None, 2, 'nearest' ] ], # 20
+    [ [ -1, 1 ], 1, Concat, [ 1 ] ],  # 21 cat backbone P1
+
+    # elan-1 block
+    [ -1, 1, ELAN1, [ 16, 16, 16 ] ],  # 22 (P1/2-xx-small)
+
+    # conv down
+    [-1, 1, Conv, [16, 3, 2]],  # 23-P2/4
+    [[-1, 19], 1, Concat, [1]],  # 24 cat head P2
+
+    # elan-1 block
+    [ -1, 1, ELAN1, [ 32, 32, 16 ] ],  # 25 (P2/4-x-small)
+
+    # conv down
+    [ -1, 1, Conv, [ 32, 3, 2 ] ],  # 26-P2/4
+    [ [ -1, 16 ], 1, Concat, [ 1 ] ],  # 27 cat head P3
+
+    # elan-2 block
+    [ -1, 1, RepNCSPELAN4, [ 64, 64, 32, 3 ] ],  # 28 (P3/8-small)
+
+    # avg-conv-down merge
+    [-1, 1, AConv, [48]], # 29
+    [[-1, 13], 1, Concat, [1]],  # 30 cat head P4
+
+    # elan-2 block
+    [-1, 1, RepNCSPELAN4, [96, 96, 48, 3]],  # 31 (P4/16-medium)
+
+    # avg-conv-down merge
+    [-1, 1, AConv, [64]], # 32
+    [[-1, 10], 1, Concat, [1]],  # 33 cat head P5
+
+    # elan-2 block
+    [-1, 1, RepNCSPELAN4, [128, 128, 64, 3]],  # 34 (P5/32-large)
+   
+   # elan-spp block
+   [9, 1, SPPELAN, [128, 64]],  # 35
+
+   # up-concat merge
+   [-1, 1, nn.Upsample, [None, 2, 'nearest']], # 36
+   [[-1, 7], 1, Concat, [1]],  # 37 cat backbone P4
+
+   # elan-2 block
+   [-1, 1, RepNCSPELAN4, [96, 96, 48, 3]],  # 38
+
+   # up-concat merge
+   [-1, 1, nn.Upsample, [None, 2, 'nearest']], # 39
+   [[-1, 5], 1, Concat, [1]],  # 40 cat backbone P3
+
+   # elan-2 block
+   [-1, 1, RepNCSPELAN4, [64, 64, 32, 3]],  # 41
+
+   # up-concat merge
+   [ -1, 1, nn.Upsample, [ None, 2, 'nearest' ] ], # 42
+   [ [ -1, 3 ], 1, Concat, [ 1 ] ],  # 43 cat backbone P2
+
+   # elan-1 block
+   [ -1, 1, ELAN1, [ 32, 32, 16 ] ],  # 44
+
+   # up-concat merge
+   [ -1, 1, nn.Upsample, [ None, 2, 'nearest' ] ], # 45
+   [ [ -1, 1 ], 1, Concat, [ 1 ] ],  # 46 cat backbone P1
+
+   # elan-1 block
+   [ -1, 1, ELAN1, [ 16, 16, 16 ] ],  # 47
+
+   # detect
+   [[47, 44, 41, 38, 35, 22, 25, 28, 31, 34], 1, DualDDetect, [nc]],  # Detect(P1, P2, P3, P4, P5)
+  ]
